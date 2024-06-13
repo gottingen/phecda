@@ -96,6 +96,7 @@ unsigned int divisor = 1;
 
 int main() {
 
+    std::cout << " phekda version: " << phekda::version() << std::endl;
     int num_threads = 20;       // Number of threads for operations with index
 
     phekda::CoreConfig core_config;

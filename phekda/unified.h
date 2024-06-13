@@ -24,6 +24,7 @@
 #include <turbo/utility/status.h>
 #include <phekda/core/config.h>
 #include <phekda/core/search_context.h>
+#include <phekda/version.h>
 
 namespace phekda {
 
@@ -32,6 +33,10 @@ namespace phekda {
         INIT_LOAD = 1,
         INIT_INIT = 2
     };
+
+    inline std::string version() {
+        return PHEKDA_VERSION_STRING;
+    }
 
     class UnifiedIndex {
     public:
