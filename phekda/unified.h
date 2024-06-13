@@ -27,6 +27,11 @@
 
 namespace phekda {
 
+    enum class IndexInitializationType {
+        INIT_NONE = 0,
+        INIT_LOAD = 1,
+        INIT_INIT = 2
+    };
 
     class UnifiedIndex {
     public:
@@ -36,12 +41,26 @@ namespace phekda {
         virtual turbo::Status initialize(const IndexConfig &config) = 0;
 
         // add vector to index with label
-        virtual turbo::Status add_vector(turbo::Nonnull<const uint8_t *> data, LabelType label) = 0;
+        // implement should care the write_conf parameter to be empty write_conf.has_value() == false
+        // if the parameter must be specified, it should be override the function
+        // with no default parameter for write_conf
+        virtual turbo::Status add_vector(turbo::Nonnull<const uint8_t *> data, LabelType label, std::any write_conf) = 0;
+
+        virtual turbo::Status add_vector(turbo::Nonnull<const uint8_t *> data, LabelType label) {
+            return add_vector(data, label, {});
+        }
 
         // add vectors to index with labels
+        // implement should care the write_conf parameter to be empty write_conf.has_value() == false
+        // if the parameter must be specified, it should be override the function
+        // with no default parameter for write_conf
         virtual turbo::Status
-        add_vectors(turbo::Nonnull<const uint8_t *> data, turbo::Nonnull<const LabelType *> labels, uint32_t num) = 0;
+        add_vectors(turbo::Nonnull<const uint8_t *> data, turbo::Nonnull<const LabelType *> labels, uint32_t num, std::any write_conf) = 0;
 
+        virtual turbo::Status
+        add_vectors(turbo::Nonnull<const uint8_t *> data, turbo::Nonnull<const LabelType *> labels, uint32_t num) {
+            return add_vectors(data, labels, num, {});
+        }
         // remove vector from index, return false if not found
         // the data will should allocate by the caller
         virtual turbo::Status get_vector(LabelType label, turbo::Nonnull<uint8_t *> data) = 0;
@@ -60,7 +79,7 @@ namespace phekda {
         // if the index search in different way, it should be specified in the
         // config.index_conf, and the index should be able to parse the config
         // and search in the way specified in the config
-        virtual turbo::Status search(const SearchContext &context) = 0;
+        virtual turbo::Status search(SearchContext &context) = 0;
 
         // remove vector from index, just mark it as deleted
         // the vector should not present in search result, but
@@ -73,7 +92,7 @@ namespace phekda {
 
         // get index snapshot
         // the index should be able to provide a snapshot
-        virtual LabelType snapshot() = 0;
+        virtual LabelType snapshot_id() const = 0;
 
         // install snapshot to index
         // the index should be able to install the snapshot
@@ -85,7 +104,7 @@ namespace phekda {
 
         // load snapshot to index
         // all the operation should be blocked until the snapshot is loaded
-        virtual turbo::Status load(const std::string &path, const std::any &load_conf) = 0;
+        virtual turbo::Status load(const std::string &path, const IndexConfig &config) = 0;
 
         // index is real time or not
         virtual bool support_dynamic() const = 0;
@@ -117,14 +136,16 @@ namespace phekda {
         // next time a new index should be call load to load the new index data
         virtual turbo::Status build(std::any conf) const = 0;
 
-        virtual const CoreConfig &get_core_config() const = 0;
+        virtual CoreConfig get_core_config() const = 0;
 
-        virtual const IndexConfig &get_index_config() const = 0;
+        virtual IndexConfig get_index_config() const = 0;
+
+        virtual IndexInitializationType get_initialization_type() const = 0;
 
     public:
 
         /// create index
-        static UnifiedIndex* create(IndexType type);
+        static UnifiedIndex* create_index(IndexType type);
     };
 
 }  // namespace phekda

@@ -102,8 +102,8 @@ namespace phekda {
             return *this;
         }
 
-        SearchContext& with_query(const turbo::Nonnull<uint8_t *> query_ptr, uint32_t bytes) {
-            this->query.assign(query_ptr, query_ptr + bytes);
+        SearchContext& with_query(const turbo::Nonnull<const uint8_t *> query_ptr) {
+            this->query.assign(query_ptr, query_ptr + data_size);
             return *this;
         }
 

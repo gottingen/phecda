@@ -30,3 +30,4 @@ carbin_cc_binary(
         COPTS ${USER_CXX_FLAGS}
 )
 ]]
+add_subdirectory(hnswlib)

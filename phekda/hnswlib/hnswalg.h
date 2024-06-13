@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <unordered_set>
 #include <list>
+#include <turbo/log/logging.h>
 
 namespace phekda {
 
@@ -36,16 +37,17 @@ namespace phekda {
         static const LocationType MAX_LABEL_OPERATION_LOCKS = 65536;
         static const unsigned char DELETE_MARK = 0x01;
 
-        size_t max_elements_{0};
         mutable std::atomic<size_t> cur_element_count{0};  // current number of elements
         size_t size_data_per_element_{0};
         size_t size_links_per_element_{0};
         mutable std::atomic<size_t> num_deleted_{0};  // number of deleted elements
-        size_t M_{0};
         size_t maxM_{0};
         size_t maxM0_{0};
-        size_t ef_construction_{0};
         size_t ef_{0};
+
+        HnswlibConfig hnsw_conf;
+        CoreConfig core_conf;
+        uint64_t snapshot_id_{0};
 
         double mult_{0.0}, revSize_{0.0};
         int maxlevel_{0};
@@ -81,8 +83,6 @@ namespace phekda {
         mutable std::atomic<long> metric_distance_computations{0};
         mutable std::atomic<long> metric_hops{0};
 
-        bool allow_replace_deleted_ = false;  // flag to replace deleted elements (marked as deleted) during insertions
-
         std::mutex deleted_elements_lock;  // lock for deleted_elements
         std::unordered_set<LocationType> deleted_elements;  // contains internal ids of deleted elements
 
@@ -101,25 +101,27 @@ namespace phekda {
         }
 
         turbo::Status initialize(const CoreConfig &config, const HnswlibConfig &hnswlib_config) override {
-            max_elements_ = config.max_elements;
-            std::vector<std::mutex> tmp(max_elements_);
+            hnsw_conf = hnswlib_config;
+            if(hnsw_conf.space == nullptr) {
+                return turbo::invalid_argument_error("SpaceInterface is not set");
+            }
+            core_conf = config;
+            std::vector<std::mutex> tmp(core_conf.max_elements);
             link_list_locks_ = std::move(tmp);
             std::vector<std::mutex> label_op_locks_tmp(MAX_LABEL_OPERATION_LOCKS);
             label_op_locks_ = std::move(label_op_locks_tmp);
-            element_levels_.resize(max_elements_);
-            allow_replace_deleted_ = hnswlib_config.allow_replace_deleted;
+            element_levels_.resize(core_conf.max_elements);
             num_deleted_ = 0;
-            data_size_ = hnswlib_config.space->get_data_size();
-            fstdistfunc_ = hnswlib_config.space->get_dist_func();
-            dist_func_param_ = hnswlib_config.space->get_dist_func_param();
-            M_ = hnswlib_config.M;
-            maxM_ = M_;
-            maxM0_ = M_ * 2;
-            ef_construction_ = std::max(static_cast<size_t>(hnswlib_config.ef_construction), M_);
+            data_size_ = hnsw_conf.space->get_data_size();
+            fstdistfunc_ = hnsw_conf.space->get_dist_func();
+            dist_func_param_ = hnsw_conf.space->get_dist_func_param();
+            maxM_ = hnsw_conf.M;
+            maxM0_ = hnsw_conf.M * 2;
+            hnsw_conf.ef_construction = std::max(hnsw_conf.ef_construction, hnsw_conf.M);
             ef_ = 10;
 
-            level_generator_.seed(hnswlib_config.random_seed);
-            update_probability_generator_.seed(hnswlib_config.random_seed + 1);
+            level_generator_.seed(hnsw_conf.random_seed);
+            update_probability_generator_.seed(hnsw_conf.random_seed + 1);
 
             size_links_level0_ = maxM0_ * sizeof(LocationType) + sizeof(LocationType);
             size_data_per_element_ = size_links_level0_ + data_size_ + sizeof(LabelType);
@@ -127,29 +129,41 @@ namespace phekda {
             label_offset_ = size_links_level0_ + data_size_;
             offsetLevel0_ = 0;
 
-            data_level0_memory_ = (char *) malloc(max_elements_ * size_data_per_element_);
+            data_level0_memory_ = (char *) malloc(core_conf.max_elements * size_data_per_element_);
+            LOG(INFO) << "initialize: " << core_conf.max_elements << " " << size_data_per_element_;
             if (data_level0_memory_ == nullptr) {
                 return turbo::resource_exhausted_error("Not enough memory: HierarchicalNSW failed to allocate data");
             }
 
             cur_element_count = 0;
 
-            visited_list_pool_ = new VisitedListPool(1, max_elements_);
+            visited_list_pool_ = new VisitedListPool(1, core_conf.max_elements);
 
             // initializations for special treatment of the first node
             enterpoint_node_ = -1;
             maxlevel_ = -1;
 
-            linkLists_ = (char **) malloc(sizeof(void *) * max_elements_);
+            linkLists_ = (char **) malloc(sizeof(void *) * core_conf.max_elements);
             if (linkLists_ == nullptr) {
                 return turbo::resource_exhausted_error("Not enough memory: HierarchicalNSW failed to allocate linklists");
             }
             size_links_per_element_ = maxM_ * sizeof(LocationType) + sizeof(LocationType);
-            mult_ = 1 / log(1.0 * M_);
+            mult_ = 1 / log(1.0 * hnsw_conf.M);
             revSize_ = 1.0 / mult_;
             return turbo::OkStatus();
         }
 
+        HnswlibConfig  get_index_config() const override {
+            return hnsw_conf;
+        }
+
+        CoreConfig  get_core_config() const override {
+            return core_conf;
+        }
+
+        uint64_t snapshot_id() const override {
+            return snapshot_id_;
+        }
 
         struct CompareByFirst {
             constexpr bool operator()(std::pair<DistanceType, LocationType> const &a,
@@ -202,7 +216,7 @@ namespace phekda {
         }
 
         size_t getMaxElements() {
-            return max_elements_;
+            return core_conf.max_elements;
         }
 
         size_t getCurrentElementCount() {
@@ -236,7 +250,7 @@ namespace phekda {
 
             while (!candidateSet.empty()) {
                 std::pair<DistanceType, LocationType> curr_el_pair = candidateSet.top();
-                if ((-curr_el_pair.first) > lowerBound && top_candidates.size() == ef_construction_) {
+                if ((-curr_el_pair.first) > lowerBound && top_candidates.size() == hnsw_conf.ef_construction) {
                     break;
                 }
                 candidateSet.pop();
@@ -273,7 +287,7 @@ namespace phekda {
                     char *currObj1 = (getDataByInternalId(candidate_id));
 
                     DistanceType dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
-                    if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
+                    if (top_candidates.size() < hnsw_conf.ef_construction || lowerBound > dist1) {
                         candidateSet.emplace(-dist1, candidate_id);
 #ifdef USE_SSE
                         _mm_prefetch(getDataByInternalId(candidateSet.top().second), _MM_HINT_T0);
@@ -282,7 +296,7 @@ namespace phekda {
                         if (!isMarkedDeleted(candidate_id))
                             top_candidates.emplace(dist1, candidate_id);
 
-                        if (top_candidates.size() > ef_construction_)
+                        if (top_candidates.size() > hnsw_conf.ef_construction)
                             top_candidates.pop();
 
                         if (!top_candidates.empty())
@@ -457,12 +471,12 @@ namespace phekda {
                 int level,
                 bool isUpdate) {
             size_t Mcurmax = level ? maxM_ : maxM0_;
-            getNeighborsByHeuristic2(top_candidates, M_);
-            if (top_candidates.size() > M_)
-                throw std::runtime_error("Should be not be more than M_ candidates returned by the heuristic");
+            getNeighborsByHeuristic2(top_candidates, hnsw_conf.M);
+            if (top_candidates.size() > hnsw_conf.M)
+                throw std::runtime_error("Should be not be more than hnsw_conf.M candidates returned by the heuristic");
 
             std::vector<LocationType> selectedNeighbors;
-            selectedNeighbors.reserve(M_);
+            selectedNeighbors.reserve(hnsw_conf.M);
             while (top_candidates.size() > 0) {
                 selectedNeighbors.push_back(top_candidates.top().second);
                 top_candidates.pop();
@@ -603,60 +617,86 @@ namespace phekda {
                 throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
             linkLists_ = linkLists_new;
 
-            max_elements_ = new_max_elements;
+            core_conf.max_elements = new_max_elements;
         }
 
+        turbo::Status saveIndex(const std::string &location, uint64_t snapshot) override{
+            try {
+                std::ofstream output(location, std::ios::binary);
+                std::streampos position;
+                snapshot_id_ = snapshot;
+                // save core config
+                writeBinaryPOD(output, static_cast<uint32_t>(core_conf.index_type));
+                writeBinaryPOD(output, static_cast<uint32_t>(core_conf.data));
+                writeBinaryPOD(output, static_cast<uint32_t>(core_conf.metric));
+                writeBinaryPOD(output, core_conf.dimension);
+                writeBinaryPOD(output, core_conf.worker_num);
+                writeBinaryPOD(output, core_conf.max_elements);
+                writeBinaryPOD(output, snapshot_id_);
+                writeBinaryPOD(output, offsetLevel0_);
+                writeBinaryPOD(output, cur_element_count);
+                writeBinaryPOD(output, size_data_per_element_);
+                writeBinaryPOD(output, label_offset_);
+                writeBinaryPOD(output, offsetData_);
+                writeBinaryPOD(output, maxlevel_);
+                writeBinaryPOD(output, enterpoint_node_);
+                writeBinaryPOD(output, maxM_);
 
-        void saveIndex(const std::string &location) {
-            std::ofstream output(location, std::ios::binary);
-            std::streampos position;
+                writeBinaryPOD(output, maxM0_);
+                writeBinaryPOD(output, hnsw_conf.M);
+                writeBinaryPOD(output, mult_);
+                writeBinaryPOD(output, hnsw_conf.ef_construction);
 
-            writeBinaryPOD(output, offsetLevel0_);
-            writeBinaryPOD(output, max_elements_);
-            writeBinaryPOD(output, cur_element_count);
-            writeBinaryPOD(output, size_data_per_element_);
-            writeBinaryPOD(output, label_offset_);
-            writeBinaryPOD(output, offsetData_);
-            writeBinaryPOD(output, maxlevel_);
-            writeBinaryPOD(output, enterpoint_node_);
-            writeBinaryPOD(output, maxM_);
+                output.write(data_level0_memory_, cur_element_count * size_data_per_element_);
 
-            writeBinaryPOD(output, maxM0_);
-            writeBinaryPOD(output, M_);
-            writeBinaryPOD(output, mult_);
-            writeBinaryPOD(output, ef_construction_);
-
-            output.write(data_level0_memory_, cur_element_count * size_data_per_element_);
-
-            for (size_t i = 0; i < cur_element_count; i++) {
-                unsigned int linkListSize = element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
-                writeBinaryPOD(output, linkListSize);
-                if (linkListSize)
-                    output.write(linkLists_[i], linkListSize);
+                for (size_t i = 0; i < cur_element_count; i++) {
+                    unsigned int linkListSize =
+                            element_levels_[i] > 0 ? size_links_per_element_ * element_levels_[i] : 0;
+                    writeBinaryPOD(output, linkListSize);
+                    if (linkListSize)
+                        output.write(linkLists_[i], linkListSize);
+                }
+                output.close();
+            } catch (std::exception &e) {
+                return turbo::internal_error(e.what());
             }
-            output.close();
+            return turbo::OkStatus();
         }
 
-
-        void loadIndex(const std::string &location, SpaceInterface<DistanceType> *s, size_t max_elements_i = 0) {
+        turbo::Status loadIndex(const std::string &location, const CoreConfig &config, const HnswlibConfig &hnswlib_config) override {
             std::ifstream input(location, std::ios::binary);
 
-            if (!input.is_open())
-                throw std::runtime_error("Cannot open file");
-
+            if (!input.is_open()) {
+                return turbo::internal_error("Cannot open file");
+            }
+            hnsw_conf = hnswlib_config;
+            core_conf = config;
             // get file size:
             input.seekg(0, input.end);
             std::streampos total_filesize = input.tellg();
             input.seekg(0, input.beg);
 
+            // load core config
+            CoreConfig tmp_core_conf;
+            uint32_t tmp;
+            readBinaryPOD(input, tmp);
+            tmp_core_conf.index_type = static_cast<IndexType>(tmp);
+            readBinaryPOD(input, tmp);
+            tmp_core_conf.data = static_cast<DataType>(tmp);
+            readBinaryPOD(input, tmp);
+            tmp_core_conf.metric = static_cast<MetricType>(tmp);
+            readBinaryPOD(input, tmp_core_conf.dimension);
+            readBinaryPOD(input, tmp_core_conf.worker_num);
+            readBinaryPOD(input, tmp_core_conf.max_elements);
+            core_conf = tmp_core_conf;
+            readBinaryPOD(input, snapshot_id_);
             readBinaryPOD(input, offsetLevel0_);
-            readBinaryPOD(input, max_elements_);
             readBinaryPOD(input, cur_element_count);
 
-            size_t max_elements = max_elements_i;
+            size_t max_elements = config.max_elements;
             if (max_elements < cur_element_count)
-                max_elements = max_elements_;
-            max_elements_ = max_elements;
+                max_elements =  core_conf.max_elements;
+            core_conf.max_elements = max_elements;
             readBinaryPOD(input, size_data_per_element_);
             readBinaryPOD(input, label_offset_);
             readBinaryPOD(input, offsetData_);
@@ -665,13 +705,13 @@ namespace phekda {
 
             readBinaryPOD(input, maxM_);
             readBinaryPOD(input, maxM0_);
-            readBinaryPOD(input, M_);
+            readBinaryPOD(input, hnsw_conf.M);
             readBinaryPOD(input, mult_);
-            readBinaryPOD(input, ef_construction_);
+            readBinaryPOD(input, hnsw_conf.ef_construction);
 
-            data_size_ = s->get_data_size();
-            fstdistfunc_ = s->get_dist_func();
-            dist_func_param_ = s->get_dist_func_param();
+            data_size_ = hnsw_conf.space->get_data_size();
+            fstdistfunc_ = hnsw_conf.space->get_dist_func();
+            dist_func_param_ = hnsw_conf.space->get_dist_func_param();
 
             auto pos = input.tellg();
 
@@ -679,7 +719,7 @@ namespace phekda {
             input.seekg(cur_element_count * size_data_per_element_, input.cur);
             for (size_t i = 0; i < cur_element_count; i++) {
                 if (input.tellg() < 0 || input.tellg() >= total_filesize) {
-                    throw std::runtime_error("Index seems to be corrupted or unsupported");
+                    return turbo::internal_error("Index seems to be corrupted or unsupported");
                 }
 
                 unsigned int linkListSize;
@@ -690,8 +730,9 @@ namespace phekda {
             }
 
             // throw exception if it either corrupted or old index
-            if (input.tellg() != total_filesize)
-                throw std::runtime_error("Index seems to be corrupted or unsupported");
+            if (input.tellg() != total_filesize) {
+                return turbo::internal_error("Index seems to be corrupted or unsupported");
+            }
 
             input.clear();
             /// Optional check end
@@ -699,8 +740,9 @@ namespace phekda {
             input.seekg(pos, input.beg);
 
             data_level0_memory_ = (char *) malloc(max_elements * size_data_per_element_);
-            if (data_level0_memory_ == nullptr)
-                throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
+            if (data_level0_memory_ == nullptr) {
+                return turbo::resource_exhausted_error("Not enough memory: loadIndex failed to allocate level0");
+            }
             input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
 
             size_links_per_element_ = maxM_ * sizeof(LocationType) + sizeof(LocationType);
@@ -712,8 +754,9 @@ namespace phekda {
             visited_list_pool_ = new VisitedListPool(1, max_elements);
 
             linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
-            if (linkLists_ == nullptr)
-                throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
+            if (linkLists_ == nullptr) {
+                return turbo::resource_exhausted_error("Not enough memory: loadIndex failed to allocate linklists");
+            }
             element_levels_ = std::vector<int>(max_elements);
             revSize_ = 1.0 / mult_;
             ef_ = 10;
@@ -727,8 +770,9 @@ namespace phekda {
                 } else {
                     element_levels_[i] = linkListSize / size_links_per_element_;
                     linkLists_[i] = (char *) malloc(linkListSize);
-                    if (linkLists_[i] == nullptr)
-                        throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
+                    if (linkLists_[i] == nullptr) {
+                        return turbo::resource_exhausted_error("Not enough memory: loadIndex failed to allocate linklist");
+                    }
                     input.read(linkLists_[i], linkListSize);
                 }
             }
@@ -736,13 +780,13 @@ namespace phekda {
             for (size_t i = 0; i < cur_element_count; i++) {
                 if (isMarkedDeleted(i)) {
                     num_deleted_ += 1;
-                    if (allow_replace_deleted_) deleted_elements.insert(i);
+                    if (hnsw_conf.allow_replace_deleted) deleted_elements.insert(i);
                 }
             }
 
             input.close();
 
-            return;
+            return turbo::OkStatus();
         }
 
 
@@ -774,19 +818,34 @@ namespace phekda {
         /*
         * Marks an element with the given label deleted, does NOT really change the current graph.
         */
-        void markDelete(LabelType label) {
+        turbo::Status markDelete(LabelType label) override {
             // lock all operations with element by label
             std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
 
             std::unique_lock<std::mutex> lock_table(label_lookup_lock);
             auto search = label_lookup_.find(label);
             if (search == label_lookup_.end()) {
-                throw std::runtime_error("Label not found");
+                return turbo::not_found_error("Label not found");
             }
             LocationType internalId = search->second;
             lock_table.unlock();
 
-            markDeletedInternal(internalId);
+            return markDeletedInternal(internalId);
+        }
+
+        virtual turbo::Status getVector(LabelType label, void *data) override{
+            std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
+
+            std::unique_lock<std::mutex> lock_table(label_lookup_lock);
+            auto search = label_lookup_.find(label);
+            if (search == label_lookup_.end()) {
+                return turbo::not_found_error("Label not found");
+            }
+            LocationType internalId = search->second;
+            lock_table.unlock();
+            auto *ptr = getDataByInternalId(internalId);
+            std::memcpy(data, ptr, data_size_);
+            return turbo::OkStatus();
         }
 
 
@@ -794,19 +853,22 @@ namespace phekda {
         * Uses the last 16 bits of the memory for the linked list size to store the mark,
         * whereas maxM0_ has to be limited to the lower 16 bits, however, still large enough in almost all cases.
         */
-        void markDeletedInternal(LocationType internalId) {
-            assert(internalId < cur_element_count);
+        turbo::Status markDeletedInternal(LocationType internalId) {
+            if(internalId >= cur_element_count) {
+                return turbo::out_of_range_error("The requested to delete element is already deleted");
+            }
             if (!isMarkedDeleted(internalId)) {
                 unsigned char *ll_cur = ((unsigned char *) get_linklist0(internalId)) + 2;
                 *ll_cur |= DELETE_MARK;
                 num_deleted_ += 1;
-                if (allow_replace_deleted_) {
+                if (hnsw_conf.allow_replace_deleted) {
                     std::unique_lock<std::mutex> lock_deleted_elements(deleted_elements_lock);
                     deleted_elements.insert(internalId);
                 }
             } else {
-                throw std::runtime_error("The requested to delete element is already deleted");
+                return turbo::not_found_error("The requested to delete element is already deleted");
             }
+            return turbo::OkStatus();
         }
 
 
@@ -841,7 +903,7 @@ namespace phekda {
                 unsigned char *ll_cur = ((unsigned char *) get_linklist0(internalId)) + 2;
                 *ll_cur &= ~DELETE_MARK;
                 num_deleted_ -= 1;
-                if (allow_replace_deleted_) {
+                if (hnsw_conf.allow_replace_deleted) {
                     std::unique_lock<std::mutex> lock_deleted_elements(deleted_elements_lock);
                     deleted_elements.erase(internalId);
                 }
@@ -874,16 +936,15 @@ namespace phekda {
         * Adds point. Updates the point if it is already in the index.
         * If replacement of deleted elements is enabled: replaces previously deleted point if any, updating it with new point
         */
-        void addPoint(const void *data_point, LabelType label, bool replace_deleted = false) {
-            if ((allow_replace_deleted_ == false) && (replace_deleted == true)) {
-                throw std::runtime_error("Replacement of deleted elements is disabled in constructor");
+        turbo::Status addPoint(const void *data_point, LabelType label, HnswlibWriteConfig wconf) override {
+            if ((hnsw_conf.allow_replace_deleted == false) && (wconf.replace_deleted == true)) {
+                return turbo::invalid_argument_error("Replacement of deleted elements is disabled in constructor");
             }
 
             // lock all operations with element by label
             std::unique_lock<std::mutex> lock_label(getLabelOpMutex(label));
-            if (!replace_deleted) {
-                addPoint(data_point, label, -1);
-                return;
+            if (!wconf.replace_deleted) {
+                return add_point_impl(data_point, label, -1).status();
             }
             // check if there is vacant place
             LocationType internal_id_replaced;
@@ -898,7 +959,7 @@ namespace phekda {
             // if there is no vacant place then add or update point
             // else add point to vacant place
             if (!is_vacant_place) {
-                addPoint(data_point, label, -1);
+                return add_point_impl(data_point, label, -1).status();
             } else {
                 // we assume that there are no concurrent operations on deleted element
                 LabelType label_replaced = getExternalLabel(internal_id_replaced);
@@ -912,6 +973,7 @@ namespace phekda {
                 unmarkDeletedInternal(internal_id_replaced);
                 updatePoint(data_point, internal_id_replaced, 1.0);
             }
+            return turbo::OkStatus();
         }
 
 
@@ -957,7 +1019,7 @@ namespace phekda {
                     std::priority_queue<std::pair<DistanceType, LocationType>, std::vector<std::pair<DistanceType, LocationType>>, CompareByFirst> candidates;
                     size_t size = sCand.find(neigh) == sCand.end() ? sCand.size() : sCand.size() -
                                                                                     1;  // sCand guaranteed to have size >= 1
-                    size_t elementsToKeep = std::min(ef_construction_, size);
+                    size_t elementsToKeep = std::min(hnsw_conf.ef_construction, size);
                     for (auto &&cand: sCand) {
                         if (cand == neigh)
                             continue;
@@ -1056,7 +1118,7 @@ namespace phekda {
                         filteredTopCandidates.emplace(
                                 fstdistfunc_(dataPoint, getDataByInternalId(entryPointInternalId), dist_func_param_),
                                 entryPointInternalId);
-                        if (filteredTopCandidates.size() > ef_construction_)
+                        if (filteredTopCandidates.size() > hnsw_conf.ef_construction)
                             filteredTopCandidates.pop();
                     }
 
@@ -1078,7 +1140,7 @@ namespace phekda {
         }
 
 
-        LocationType addPoint(const void *data_point, LabelType label, int level) {
+        turbo::Result<LocationType> add_point_impl(const void *data_point, LabelType label, int level) {
             LocationType cur_c = 0;
             {
                 // Checking if the element with the same label already exists
@@ -1087,10 +1149,10 @@ namespace phekda {
                 auto search = label_lookup_.find(label);
                 if (search != label_lookup_.end()) {
                     LocationType existingInternalId = search->second;
-                    if (allow_replace_deleted_) {
+                    if (hnsw_conf.allow_replace_deleted) {
                         if (isMarkedDeleted(existingInternalId)) {
-                            throw std::runtime_error(
-                                    "Can't use addPoint to update deleted elements if replacement of deleted elements is enabled.");
+                            return turbo::invalid_argument_error(
+                                    "Can't use add point to update deleted elements if replacement of deleted elements is enabled.");
                         }
                     }
                     lock_table.unlock();
@@ -1103,8 +1165,8 @@ namespace phekda {
                     return existingInternalId;
                 }
 
-                if (cur_element_count >= max_elements_) {
-                    throw std::runtime_error("The number of elements exceeds the specified limit");
+                if (cur_element_count >= core_conf.max_elements) {
+                    return turbo::out_of_range_error("The number of elements exceeds the specified limit");
                 }
 
                 cur_c = cur_element_count;
@@ -1134,8 +1196,9 @@ namespace phekda {
 
             if (curlevel) {
                 linkLists_[cur_c] = (char *) malloc(size_links_per_element_ * curlevel + 1);
-                if (linkLists_[cur_c] == nullptr)
-                    throw std::runtime_error("Not enough memory: addPoint failed to allocate linklist");
+                if (linkLists_[cur_c] == nullptr) {
+                    return turbo::out_of_range_error("Not enough memory: add point failed to allocate linklist");
+                }
                 memset(linkLists_[cur_c], 0, size_links_per_element_ * curlevel + 1);
             }
 
@@ -1154,8 +1217,9 @@ namespace phekda {
                             LocationType *datal = (LocationType *) (data + 1);
                             for (int i = 0; i < size; i++) {
                                 LocationType cand = datal[i];
-                                if (cand < 0 || cand > max_elements_)
-                                    throw std::runtime_error("cand error");
+                                if (cand < 0 || cand > core_conf.max_elements) {
+                                    return turbo::internal_error("cand error");
+                                }
                                 DistanceType d = fstdistfunc_(data_point, getDataByInternalId(cand), dist_func_param_);
                                 if (d < curdist) {
                                     curdist = d;
@@ -1169,8 +1233,9 @@ namespace phekda {
 
                 bool epDeleted = isMarkedDeleted(enterpoint_copy);
                 for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--) {
-                    if (level > maxlevelcopy || level < 0)  // possible?
-                        throw std::runtime_error("Level error");
+                    if (level > maxlevelcopy || level < 0) {
+                        return turbo::internal_error("Level error");
+                    }
 
                     std::priority_queue<std::pair<DistanceType, LocationType>, std::vector<std::pair<DistanceType, LocationType>>, CompareByFirst> top_candidates = searchBaseLayer(
                             currObj, data_point, level);
@@ -1178,7 +1243,7 @@ namespace phekda {
                         top_candidates.emplace(
                                 fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy), dist_func_param_),
                                 enterpoint_copy);
-                        if (top_candidates.size() > ef_construction_)
+                        if (top_candidates.size() > hnsw_conf.ef_construction)
                             top_candidates.pop();
                     }
                     currObj = mutuallyConnectNewElement(data_point, cur_c, top_candidates, level, false);
@@ -1197,6 +1262,153 @@ namespace phekda {
             return cur_c;
         }
 
+        template<bool has_deletions, bool collect_metrics = false>
+        turbo::Status search_impl(LocationType ep_id, SearchContext&context, size_t ef, MaxResultQueue &queue) const {
+            VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+            vl_type *visited_array = vl->mass;
+            vl_type visited_array_tag = vl->curV;
+            MinResultQueue candidate_set;
+            auto data_point = context.get_query();
+            DistanceType lowerBound;
+            auto ep_label = getExternalLabel(ep_id);
+            if ((!has_deletions || !isMarkedDeleted(ep_id)) && !context.is_exclude(ep_label)) {
+                DistanceType dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
+                lowerBound = dist;
+                queue.emplace(dist, ep_label, ep_id);
+                candidate_set.emplace(dist, ep_label, ep_id);
+            } else {
+                lowerBound = std::numeric_limits<DistanceType>::max();
+                candidate_set.emplace(lowerBound, ep_label, ep_id);
+            }
+
+            visited_array[ep_id] = visited_array_tag;
+
+            while (!candidate_set.empty()) {
+                auto current_node_pair = candidate_set.top();
+
+                if ((-current_node_pair.distance) > lowerBound &&
+                    (queue.size() == ef || (!context.has_condition() && !has_deletions))) {
+                    break;
+                }
+                candidate_set.pop();
+
+                LocationType current_node_id = current_node_pair.location;
+                int *data = (int *) get_linklist0(current_node_id);
+                size_t size = getListCount((LocationType *) data);
+//                bool cur_node_deleted = isMarkedDeleted(current_node_id);
+                if (collect_metrics) {
+                    metric_hops++;
+                    metric_distance_computations += size;
+                }
+
+#ifdef USE_SSE
+                _mm_prefetch((char *) (visited_array + *(data + 1)), _MM_HINT_T0);
+                _mm_prefetch((char *) (visited_array + *(data + 1) + 64), _MM_HINT_T0);
+                _mm_prefetch(data_level0_memory_ + (*(data + 1)) * size_data_per_element_ + offsetData_, _MM_HINT_T0);
+                _mm_prefetch((char *) (data + 2), _MM_HINT_T0);
+#endif
+
+                for (size_t j = 1; j <= size; j++) {
+                    int candidate_id = *(data + j);
+//                    if (candidate_id == 0) continue;
+#ifdef USE_SSE
+                    _mm_prefetch((char *) (visited_array + *(data + j + 1)), _MM_HINT_T0);
+                    _mm_prefetch(data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_,
+                                 _MM_HINT_T0);  ////////////
+#endif
+                    if (!(visited_array[candidate_id] == visited_array_tag)) {
+                        visited_array[candidate_id] = visited_array_tag;
+                        auto candidate_label = getExternalLabel(candidate_id);
+                        char *currObj1 = (getDataByInternalId(candidate_id));
+                        DistanceType dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
+
+                        if (queue.size() < ef || lowerBound > dist) {
+                            candidate_set.emplace(dist, candidate_label, candidate_id);
+#ifdef USE_SSE
+                            _mm_prefetch(data_level0_memory_ + candidate_set.top().location * size_data_per_element_ +
+                                         offsetLevel0_,  ///////////
+                                         _MM_HINT_T0);  ////////////////////////
+#endif
+                            if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&!context.is_exclude(candidate_label)) {
+                                queue.emplace(dist, candidate_label, candidate_id);
+                            }
+
+                            if (queue.size() > ef)
+                                queue.pop();
+
+                            if (!queue.empty())
+                                lowerBound = queue.top().distance;
+                        }
+                    }
+                }
+            }
+
+            visited_list_pool_->releaseVisitedList(vl);
+            return turbo::OkStatus();
+        }
+
+        turbo::Status search(SearchContext &context) override {
+            if (cur_element_count == 0) {
+                return turbo::OkStatus();
+            }
+
+            auto query_data = context.get_query();
+
+            LocationType currObj = enterpoint_node_;
+            DistanceType curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
+
+            for (int level = maxlevel_; level > 0; level--) {
+                bool changed = true;
+                while (changed) {
+                    changed = false;
+                    unsigned int *data;
+
+                    data = (unsigned int *) get_linklist(currObj, level);
+                    int size = getListCount(data);
+                    metric_hops++;
+                    metric_distance_computations += size;
+
+                    LocationType *datal = (LocationType *) (data + 1);
+                    for (int i = 0; i < size; i++) {
+                        LocationType cand = datal[i];
+                        if (cand < 0 || cand > core_conf.max_elements)
+                            throw std::runtime_error("cand error");
+                        DistanceType d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
+
+                        if (d < curdist) {
+                            curdist = d;
+                            currObj = cand;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            MaxResultQueue top_candidates;
+            if (num_deleted_) {
+                auto rs = search_impl<true, true>(
+                        currObj, context, std::max(ef_, static_cast<size_t>(context.top_k)), top_candidates);
+                if(!rs.ok()) {
+                    return rs;
+                }
+            } else {
+                auto rs = search_impl<false, true>(
+                        currObj, context, std::max(ef_, static_cast<size_t>(context.top_k)), top_candidates);
+                if(!rs.ok()) {
+                    return rs;
+                }
+            }
+
+            while (top_candidates.size() > context.top_k) {
+                top_candidates.pop();
+            }
+            while (!top_candidates.empty()) {
+                auto rez = top_candidates.top();
+                context.results.emplace_back(rez.distance, rez.label, rez.location);
+                top_candidates.pop();
+            }
+            return turbo::OkStatus();
+        }
 
         std::priority_queue<std::pair<DistanceType, LabelType >>
         searchKnn(const void *query_data, size_t k, BaseFilterFunctor *isIdAllowed = nullptr) const {
@@ -1220,7 +1432,7 @@ namespace phekda {
                     LocationType *datal = (LocationType *) (data + 1);
                     for (int i = 0; i < size; i++) {
                         LocationType cand = datal[i];
-                        if (cand < 0 || cand > max_elements_)
+                        if (cand < 0 || cand > core_conf.max_elements)
                             throw std::runtime_error("cand error");
                         DistanceType d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 

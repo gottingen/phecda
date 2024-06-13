@@ -186,18 +186,26 @@ namespace phekda {
 
     struct HnswlibConfig {
         bool allow_replace_deleted = false;
-        uint32_t M = 16;
-        uint32_t ef_construction = 200;
-        uint32_t random_seed = 100;
+        size_t M = 16;
+        size_t ef_construction = 200;
+        size_t random_seed = 100;
         SpaceInterface<DistanceType> *space = nullptr;
     };
+
+    struct HnswlibWriteConfig {
+        bool replace_deleted = false;
+    };
+
+    static constexpr HnswlibWriteConfig kHnswRepaceDeleted = {true};
+
+    static constexpr HnswlibWriteConfig kHnswNotReplaceDeleted = {false};
 
     class AlgorithmInterface {
     public:
 
         virtual turbo::Status initialize(const CoreConfig &config, const HnswlibConfig &hnswlib_config) = 0;
 
-        virtual void addPoint(const void *datapoint, LabelType label, bool replace_deleted = false) = 0;
+        virtual turbo::Status addPoint(const void *datapoint, LabelType label, HnswlibWriteConfig wconf) = 0;
 
         virtual std::priority_queue<std::pair<DistanceType, LabelType>>
         searchKnn(const void *, size_t, BaseFilterFunctor *isIdAllowed = nullptr) const = 0;
@@ -206,14 +214,27 @@ namespace phekda {
         virtual std::vector<std::pair<DistanceType, LabelType>>
         searchKnnCloserFirst(const void *query_data, size_t k, BaseFilterFunctor *isIdAllowed = nullptr) const;
 
-        virtual void saveIndex(const std::string &location) = 0;
+        virtual turbo::Status saveIndex(const std::string &location, uint64_t snapshot) = 0;
+
+        virtual turbo::Status loadIndex(const std::string &location, const CoreConfig &config, const HnswlibConfig &hnswlib_config) = 0;
+
+        virtual turbo::Status search(SearchContext &context)  = 0;
+
+        virtual HnswlibConfig  get_index_config() const  = 0;
+        virtual CoreConfig  get_core_config() const  = 0;
+
+        virtual uint64_t snapshot_id() const = 0;
+
+        virtual turbo::Status markDelete(LabelType label) = 0;
+
+        virtual turbo::Status getVector(LabelType label, void *data) = 0;
 
         virtual ~AlgorithmInterface() {
         }
     };
 
     std::vector<std::pair<DistanceType, LabelType>>
-    AlgorithmInterface::searchKnnCloserFirst(const void *query_data, size_t k,
+    inline AlgorithmInterface::searchKnnCloserFirst(const void *query_data, size_t k,
                                                      BaseFilterFunctor *isIdAllowed) const {
         std::vector<std::pair<DistanceType, LabelType>> result;
 

@@ -28,7 +28,7 @@ carbin_cc_test(
 carbin_cc_test_ext(
         NAME multi_thread_replace_test
         MODULE hnswlib
-        ALIAS multiThread_replace_test_01
+        ALIAS 01
         PASS_EXP "finish;Finish"
 )
 
@@ -44,7 +44,7 @@ carbin_cc_test(
 carbin_cc_test_ext(
         NAME multi_thread_load_test
         MODULE hnswlib
-        ALIAS multi_thread_load_test_01
+        ALIAS 01
         PASS_EXP "finish;Finish"
 )
 
@@ -72,3 +72,29 @@ carbin_cc_test(
         CXXOPTS ${CARBIN_CXX_OPTIONS}
 )
 ]]
+
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIRS})
+carbin_cc_test(
+        NAME save_load_test
+        MODULE hnswlib
+        SOURCES save_load_test.cc
+        LINKS ${CARBIN_DEPS_LINK} GTest::gtest GTest::gtest_main
+        CXXOPTS ${CARBIN_CXX_OPTIONS}
+)
+
+carbin_cc_test(
+        NAME knn_with_flat_filter_test
+        MODULE hnswlib
+        SOURCES knn_with_flat_filter_test.cc
+        LINKS ${CARBIN_DEPS_LINK} phekda::phekda GTest::gtest GTest::gtest_main
+        CXXOPTS ${CARBIN_CXX_OPTIONS}
+)
+
+carbin_cc_test(
+        NAME knn_with_hnsw_filter_test
+        MODULE hnswlib
+        SOURCES knn_with_hnsw_filter_test.cc
+        LINKS ${CARBIN_DEPS_LINK} phekda::phekda GTest::gtest GTest::gtest_main
+        CXXOPTS ${CARBIN_CXX_OPTIONS}
+)

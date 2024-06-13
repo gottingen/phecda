@@ -130,7 +130,7 @@ int main() {
 
         // add batch1 data
         ParallelFor(0, max_elements, num_threads, [&](size_t row, size_t threadId) {
-            alg_hnsw->addPoint((void*)(batch1 + d * row), row);
+            alg_hnsw->addPoint((void*)(batch1 + d * row), row, {false});
         });
 
         // delete half random elements of batch1 data
@@ -141,7 +141,7 @@ int main() {
         // replace deleted elements with batch2 data
         ParallelFor(0, num_elements, num_threads, [&](size_t row, size_t threadId) {
             int label = rand_labels[row] + max_elements;
-            alg_hnsw->addPoint((void*)(batch2 + d * row), label, true);
+            alg_hnsw->addPoint((void*)(batch2 + d * row), label, {true});
         });
 
         iter += 1;

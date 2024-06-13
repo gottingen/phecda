@@ -26,23 +26,26 @@
 #include <phekda/hnswlib/bruteforce.h>
 #include <phekda/hnswlib/space_ip.h>
 #include <phekda/hnswlib/space_l2.h>
+#include <turbo/synchronization/mutex.h>
 
 namespace phekda {
 
-    class HnswIndex: public UnifiedIndex {
+    class HnswIndex : public UnifiedIndex {
     public:
         HnswIndex() = default;
-        ~HnswIndex() override;
+
+        ~HnswIndex() override = default;
 
         // initialize index
         turbo::Status initialize(const IndexConfig &config) override;
 
         // add vector to index with label
-        turbo::Status add_vector(turbo::Nonnull<const uint8_t *> data, LabelType label) override;
+        turbo::Status add_vector(turbo::Nonnull<const uint8_t *> data, LabelType label, std::any write_conf) override;
 
         // add vectors to index with labels
         turbo::Status
-        add_vectors(turbo::Nonnull<const uint8_t *> data, turbo::Nonnull<const LabelType *> labels, uint32_t num) override;
+        add_vectors(turbo::Nonnull<const uint8_t *> data, turbo::Nonnull<const LabelType *> labels, uint32_t num,
+                    std::any write_conf) override;
 
         // remove vector from index, return false if not found
         // the data will should allocate by the caller
@@ -57,7 +60,7 @@ namespace phekda {
         // if the index search in different way, it should be specified in the
         // config.index_conf, and the index should be able to parse the config
         // and search in the way specified in the config
-        turbo::Status search(const SearchContext &context) override;
+        turbo::Status search(SearchContext &context) override;
 
         // remove vector from index, just mark it as deleted
         // the vector should not present in search result, but
@@ -70,7 +73,7 @@ namespace phekda {
 
         // get index snapshot
         // the index should be able to provide a snapshot
-        LabelType snapshot() override;
+        LabelType snapshot_id() const override;
 
         // install snapshot to index
         // the index should be able to install the snapshot
@@ -82,20 +85,28 @@ namespace phekda {
 
         // load snapshot to index
         // all the operation should be blocked until the snapshot is loaded
-        turbo::Status load(const std::string &path, const std::any &load_conf) override;
+        turbo::Status load(const std::string &path, const IndexConfig &config) override;
 
         // index is real time or not
-        bool support_dynamic() const override;
+        bool support_dynamic() const override {
+            return true;
+        }
 
         /// for index for not support dynamic
         // index need train or not
-        bool need_train() const override;
+        bool need_train() const override {
+            return false;
+        }
 
         // train index
-        turbo::Status train(std::any conf) override;
+        turbo::Status train(std::any conf) override {
+            return turbo::OkStatus();
+        }
 
         // is index trained
-        bool is_trained() const override;
+        bool is_trained() const override {
+            return true;
+        }
 
         // index need build or not
         // various index may need build or not
@@ -105,17 +116,30 @@ namespace phekda {
         // let it configurable in the build function's
         // conf parameter, and trans the ownership of the
         // conf to index, let index judge if it can build
-        bool support_build(std::any conf) const override;
+        bool support_build(std::any conf) const override {
+            false;
+        }
 
         // build index
         // build index should not modify the data in the index
         // only can be visited the parameters in the index
         // after build it should output a new index data.
         // next time a new index should be call load to load the new index data
-        turbo::Status build(std::any conf) const override;
-    public:
+        turbo::Status build(std::any conf) const override {
+            return turbo::unavailable_error("build not supported");
+        }
 
-        /// create index
-        static UnifiedIndex* create(IndexType type);
+        CoreConfig get_core_config() const override ;
+
+        IndexConfig get_index_config() const override;
+
+        IndexInitializationType get_initialization_type() const override {
+            return init_type_;
+        }
+    private:
+        turbo::Mutex         init_mutex_;
+        IndexInitializationType                init_type_{IndexInitializationType::INIT_NONE};
+        std::unique_ptr<AlgorithmInterface> alg_{nullptr};
+        std::unique_ptr<SpaceInterface<float>> space_{nullptr};
     };
 }  // namespace phekda

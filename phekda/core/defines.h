@@ -110,18 +110,26 @@ namespace phekda {
     };
 
     struct ResultEntity {
+        ResultEntity(DistanceType d, LabelType l, LocationType loc) : distance(d), label(l), location(loc) {}
         DistanceType distance{0.0};
         LabelType label{0};
         LocationType location{0};
     };
 
-    struct CompareResultEntity {
+    struct LessResultEntity {
         bool operator()(const ResultEntity &lhs, const ResultEntity &rhs) const {
             return lhs.distance < rhs.distance;
         }
     };
 
-    using ResultQueue = std::priority_queue<ResultEntity, std::vector<ResultEntity>, CompareResultEntity>;
+    struct GreatResultEntity {
+        bool operator()(const ResultEntity &lhs, const ResultEntity &rhs) const {
+            return lhs.distance >= rhs.distance;
+        }
+    };
+
+    using MaxResultQueue = std::priority_queue<ResultEntity, std::vector<ResultEntity>, LessResultEntity>;
+    using MinResultQueue = std::priority_queue<ResultEntity, std::vector<ResultEntity>, GreatResultEntity>;
     using ResultVector = std::vector<ResultEntity>;
 
 }  // namespace phekda

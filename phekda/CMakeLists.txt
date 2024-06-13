@@ -137,7 +137,7 @@ set(PHEKDA_SRC
 )
 carbin_cc_library(
         NAMESPACE phekda
-        NAME proto
+        NAME phekda
         SOURCES
         ${PHEKDA_SRC}
         CXXOPTS
