@@ -161,8 +161,12 @@ namespace phekda {
         }
 
         turbo::Status search(SearchContext &context) override {
+            context.schedule_time = turbo::Time::current_time();
             MaxResultQueue topResults;
-            if (cur_element_count == 0) return turbo::OkStatus();
+            if (cur_element_count == 0) {
+                context.end_time = turbo::Time::current_time();
+                return turbo::OkStatus();
+            }
             auto query_data = context.get_query();
             for (int i = 0; i < context.top_k; i++) {
                 DistanceType dist = fstdistfunc_(query_data, data_ + size_per_element_ * i, dist_func_param_);
@@ -189,11 +193,22 @@ namespace phekda {
                 }
             }
             auto with_location = context.with_location;
-            while (!topResults.empty() && context.results.size() < context.top_k) {
-                auto &top = topResults.top();
-                with_location ? context.results.push_back(top) : context.results.push_back({top.distance, top.label,0});
-                topResults.pop();
+            if(context.reverse_result) {
+                context.results.reserve(topResults.size());
+                while (!topResults.empty()) {
+                    auto rez = topResults.top();
+                    context.results.emplace_back(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    topResults.pop();
+                }
+            } else {
+                context.results.resize(topResults.size());
+                for(int i = topResults.size() - 1; i >= 0; i--) {
+                    auto rez = topResults.top();
+                    context.results[i] = ResultEntity(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    topResults.pop();
+                }
             }
+            context.end_time = turbo::Time::current_time();
             return turbo::OkStatus();
         }
 

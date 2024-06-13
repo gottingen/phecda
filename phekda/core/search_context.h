@@ -80,6 +80,12 @@ namespace phekda {
         // then set up your setting
         // 4. context.with_index_conf(user_set);
         std::any index_conf;
+
+        // default is results sorted by distance
+        // distance smaller first, mean closer first
+        // if reverse_result is true, the result will be sorted by distance
+        // distance bigger first, mean further first
+        bool reverse_result{false};
         /// data section
         // query start time
         turbo::Time start_time;

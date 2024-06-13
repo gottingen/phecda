@@ -140,7 +140,6 @@ namespace {
             context.with_top_k(k).with_query(p).with_condition(&filter_func);
             auto gd = alg_brute->search(context);
             auto res = alg_brute_base->searchKnnCloserFirst(p, k, &filter_base);
-            std::reverse(res.begin(), res.end());
             std::cout<<"Results:\n";
             std::cout<<"results size: "<<context.results.size()<<std::endl;
             ASSERT_TRUE(context.results.size() == res.size());

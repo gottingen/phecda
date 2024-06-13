@@ -31,6 +31,7 @@ namespace phekda {
         context.data_type = cc.data;
         context.dimension = cc.dimension;
         context.data_size = cc.dimension * data_type_size(cc.data);
+        context.start_time = turbo::Time::current_time();
         return context;
     }
 

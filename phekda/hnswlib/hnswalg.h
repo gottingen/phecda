@@ -1347,7 +1347,9 @@ namespace phekda {
         }
 
         turbo::Status search(SearchContext &context) override {
+            context.schedule_time = turbo::Time::current_time();
             if (cur_element_count == 0) {
+                context.end_time = turbo::Time::current_time();
                 return turbo::OkStatus();
             }
 
@@ -1370,8 +1372,10 @@ namespace phekda {
                     LocationType *datal = (LocationType *) (data + 1);
                     for (int i = 0; i < size; i++) {
                         LocationType cand = datal[i];
-                        if (cand < 0 || cand > core_conf.max_elements)
-                            throw std::runtime_error("cand error");
+                        if (cand < 0 || cand > core_conf.max_elements) {
+                            context.end_time = turbo::Time::current_time();
+                            return turbo::internal_error("cand error");
+                        }
                         DistanceType d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 
                         if (d < curdist) {
@@ -1388,12 +1392,14 @@ namespace phekda {
                 auto rs = search_impl<true, true>(
                         currObj, context, std::max(ef_, static_cast<size_t>(context.top_k)), top_candidates);
                 if(!rs.ok()) {
+                    context.end_time = turbo::Time::current_time();
                     return rs;
                 }
             } else {
                 auto rs = search_impl<false, true>(
                         currObj, context, std::max(ef_, static_cast<size_t>(context.top_k)), top_candidates);
                 if(!rs.ok()) {
+                    context.end_time = turbo::Time::current_time();
                     return rs;
                 }
             }
@@ -1401,11 +1407,22 @@ namespace phekda {
             while (top_candidates.size() > context.top_k) {
                 top_candidates.pop();
             }
-            while (!top_candidates.empty()) {
-                auto rez = top_candidates.top();
-                context.results.emplace_back(rez.distance, rez.label, rez.location);
-                top_candidates.pop();
+            if(context.reverse_result) {
+                context.results.reserve(top_candidates.size());
+                while (!top_candidates.empty()) {
+                    auto rez = top_candidates.top();
+                    context.results.emplace_back(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    top_candidates.pop();
+                }
+            } else {
+                context.results.resize(top_candidates.size());
+                for(int i = top_candidates.size() - 1; i >= 0; i--) {
+                    auto rez = top_candidates.top();
+                    context.results[i] = ResultEntity(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    top_candidates.pop();
+                }
             }
+            context.end_time = turbo::Time::current_time();
             return turbo::OkStatus();
         }
 

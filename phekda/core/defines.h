@@ -110,6 +110,7 @@ namespace phekda {
     };
 
     struct ResultEntity {
+        ResultEntity() = default;
         ResultEntity(DistanceType d, LabelType l, LocationType loc) : distance(d), label(l), location(loc) {}
         DistanceType distance{0.0};
         LabelType label{0};
