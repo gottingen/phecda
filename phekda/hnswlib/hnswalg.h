@@ -130,7 +130,6 @@ namespace phekda {
             offsetLevel0_ = 0;
 
             data_level0_memory_ = (char *) malloc(core_conf.max_elements * size_data_per_element_);
-            LOG(INFO) << "initialize: " << core_conf.max_elements << " " << size_data_per_element_;
             if (data_level0_memory_ == nullptr) {
                 return turbo::resource_exhausted_error("Not enough memory: HierarchicalNSW failed to allocate data");
             }

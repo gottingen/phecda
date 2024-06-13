@@ -23,3 +23,11 @@ carbin_cc_binary(
         CXXOPTS ${CARBIN_CXX_OPTIONS}
         LINKS phekda::phekda ${CARBIN_DEPS_LINK}
 )
+
+carbin_cc_binary(
+        NAMESPACE phekda
+        NAME filter_example
+        SOURCES filter_example.cc
+        CXXOPTS ${CARBIN_CXX_OPTIONS}
+        LINKS phekda::phekda ${CARBIN_DEPS_LINK}
+)
