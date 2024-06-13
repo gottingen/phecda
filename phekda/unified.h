@@ -40,6 +40,10 @@ namespace phekda {
 
     class UnifiedIndex {
     public:
+
+        /// create index
+        static UnifiedIndex* create_index(IndexType type);
+    public:
         virtual ~UnifiedIndex() = default;
 
         // initialize index
@@ -147,10 +151,6 @@ namespace phekda {
 
         virtual IndexInitializationType get_initialization_type() const = 0;
 
-    public:
-
-        /// create index
-        static UnifiedIndex* create_index(IndexType type);
     };
 
 }  // namespace phekda
