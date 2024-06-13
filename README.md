@@ -5,6 +5,16 @@ similar vectors in different vector search engines. It supports the following ve
 
 * hnswlib
 
+# the features of pherda:
+
+* real time
+* no exception of unified interface
+* support filter
+
+filter is a feature that can be used to filter out some vectors that do not meet the requirements before the search engine is used to search for similar vectors. This can greatly reduce the number of vectors that need to be searched, and improve the search efficiency.
+whe provide a default bitmap filter, will meet most of the requirements. If you have special requirements, you can implement your own filter.
+bitmap filter see [bitmap_condition](phekda/conditions/bitmap_condition.h)
+
 see [examples](examples/hnswlib/mt_filter_example.cc)
 
 ```c++
