@@ -84,8 +84,8 @@ void test() {
     }
 
     for (size_t i = 0; i < n; ++i) {
-        alg_brute->addPoint(data.data() + d * i, i);
-        alg_hnsw->addPoint(data.data() + d * i, i);
+        alg_brute->addPoint(data.data() + d * i, i, {false});
+        alg_hnsw->addPoint(data.data() + d * i, i, {false});
     }
 
     // test searchKnnCloserFirst of BruteforceSearch

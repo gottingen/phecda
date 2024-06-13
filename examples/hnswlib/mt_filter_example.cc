@@ -1,4 +1,25 @@
+//
+// Copyright (C) 2024 EA group inc.
+// Author: Jeff.li lijippy@163.com
+// All rights reserved.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+//
+// Created by jeff on 24-6-11.
+//
 #include <phekda/hnswlib/index.h>
+#include <phekda/unified.h>
 #include <thread>
 
 
@@ -61,42 +82,59 @@ inline void ParallelFor(size_t start, size_t end, size_t numThreads, Function fn
 
 
 // Filter that allows labels divisible by divisor
-class PickDivisibleIds: public phekda::BaseFilterFunctor {
+class PickDivisibleIds: public phekda::SearchCondition {
 unsigned int divisor = 1;
  public:
     PickDivisibleIds(unsigned int divisor): divisor(divisor) {
         assert(divisor != 0);
     }
-    bool operator()(phekda::LabelType label_id) {
-        return label_id % divisor == 0;
+    bool is_exclude(phekda::LabelType label) const override {
+        return label % divisor != 0;
     }
 };
 
 
 int main() {
-    int dim = 16;               // Dimension of the elements
-    int max_elements = 10000;   // Maximum number of elements, should be known beforehand
-    int M = 16;                 // Tightly connected with internal dimensionality of the data
-                                // strongly affects the memory consumption
-    int ef_construction = 200;  // Controls index search speed/build speed tradeoff
+
+    std::cout << " phekda version: " << phekda::version() << std::endl;
     int num_threads = 20;       // Number of threads for operations with index
 
-    // Initing index
-    phekda::L2Space space(dim);
-    phekda::HierarchicalNSW<float>* alg_hnsw = new phekda::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
+    phekda::CoreConfig core_config;
+    core_config.max_elements = 10000;
+    core_config.dimension = 16;
+    core_config.data = phekda::DataType::FLOAT32;
+    core_config.metric = phekda::MetricType::METRIC_L2;
+    core_config.index_type = phekda::IndexType::INDEX_HNSWLIB;
+
+    phekda::HnswlibConfig config;
+    config.M = 16;
+    config.ef_construction = 200;
+    config.random_seed = 123;
+    config.allow_replace_deleted = true;
+
+    auto alg_hnsw = phekda::UnifiedIndex::create_index(core_config.index_type);
+    auto rs =alg_hnsw->initialize({core_config, config});
+    if(!rs.ok()) {
+        std::cout << "Error: " << rs.message() << std::endl;
+        return 1;
+    }
 
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
     std::uniform_real_distribution<> distrib_real;
-    float* data = new float[dim * max_elements];
-    for (int i = 0; i < dim * max_elements; i++) {
+    float* data = new float[core_config.dimension * core_config.max_elements];
+    for (int i = 0; i < core_config.dimension * core_config.max_elements; i++) {
         data[i] = distrib_real(rng);
     }
 
     // Add data to index
-    ParallelFor(0, max_elements, num_threads, [&](size_t row, size_t threadId) {
-        alg_hnsw->addPoint((void*)(data + dim * row), row);
+    ParallelFor(0, core_config.max_elements, num_threads, [&](size_t row, size_t threadId) {
+        auto rs = alg_hnsw->add_vector((const uint8_t *)(data + core_config.dimension * row), row);
+        if(!rs.ok()) {
+            std::cout << "Error: " << rs.message() << std::endl;
+            exit(1);
+        }
     });
 
     // Create filter that allows only even labels
@@ -104,13 +142,18 @@ int main() {
 
     // Query the elements for themselves with filter and check returned labels
     int k = 10;
-    std::vector<phekda::LabelType> neighbors(max_elements * k);
-    ParallelFor(0, max_elements, num_threads, [&](size_t row, size_t threadId) {
-        std::priority_queue<std::pair<float, phekda::LabelType>> result = alg_hnsw->searchKnn(data + dim * row, k, &pickIdsDivisibleByTwo);
+    std::vector<phekda::LabelType> neighbors(core_config.max_elements * k);
+    LOG(INFO)<<"start multi-thread search with filter...";
+    ParallelFor(0, core_config.max_elements, num_threads, [&](size_t row, size_t threadId) {
+        auto context = alg_hnsw->create_search_context();
+        context.with_query(reinterpret_cast<const uint8_t *>(data + core_config.dimension * row)).with_top_k(k).with_condition(&pickIdsDivisibleByTwo);
+        auto rs = alg_hnsw->search(context);
+        if(!rs.ok()) {
+            std::cout << "Error: " << rs.message() << std::endl;
+            exit(1);
+        }
         for (int i = 0; i < k; i++) {
-            phekda::LabelType label = result.top().second;
-            result.pop();
-            neighbors[row * k + i] = label;
+            neighbors[row * k + i] = context.results[i].label;
         }
     });
 
@@ -120,5 +163,6 @@ int main() {
 
     delete[] data;
     delete alg_hnsw;
+    LOG(INFO)<<"done........";
     return 0;
 }

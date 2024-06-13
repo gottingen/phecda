@@ -35,11 +35,16 @@ namespace phekda {
             return false;
         }
 
-        // if the distance not in the range of [min, max], return true
-        virtual bool should_stop_search(DistanceType dis) const {
+        // lower_bound is the distance between the query and the current node minimum distance
+        // already found and set to the result set, current_dis is the distance between the query and the current node
+        // if the current_dis is too large, you judge whether to stop the search
+        // now not used
+        virtual bool should_stop_search(DistanceType current_dis, DistanceType lower_bound) const {
             return false;
         }
 
+        // if the search condition should explain the search process
+        // now not used
         virtual bool should_explain() const {
             return false;
         }
@@ -74,9 +79,9 @@ namespace phekda {
             return false;
         }
 
-        bool should_stop_search(DistanceType dis) const override {
+        bool should_stop_search(DistanceType current_dis, DistanceType lower_bound) const override {
             for (const auto &condition : conditions_) {
-                if (condition->should_stop_search(dis)) {
+                if (condition->should_stop_search(current_dis, lower_bound)) {
                     return true;
                 }
             }

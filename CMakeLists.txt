@@ -28,10 +28,10 @@ if (not_top)
     set(${PROJECT_NAME}_IS_TOP_PROJECT OFF)
 endif ()
 
-set(PROJECT_DESCRIPTION "Hercules is an ahead of time compiler for a subset of the Python language framework.")
-set(PROJECT_VERSION_MAJOR 1)
+set(PROJECT_DESCRIPTION "phekda is the composite vector search engine")
+set(PROJECT_VERSION_MAJOR 0)
 set(PROJECT_VERSION_MINOR 1)
-set(PROJECT_VERSION_PATCH 5)
+set(PROJECT_VERSION_PATCH 0)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
 set(${PROJECT_NAME}_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})

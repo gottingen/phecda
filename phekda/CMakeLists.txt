@@ -134,10 +134,11 @@ carbin_cc_library(
 set(PHEKDA_SRC
         hnswlib/index.cc
         unified.cc
+        conditions/bitmap_condition.cc
 )
 carbin_cc_library(
         NAMESPACE phekda
-        NAME proto
+        NAME phekda
         SOURCES
         ${PHEKDA_SRC}
         CXXOPTS

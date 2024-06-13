@@ -76,7 +76,10 @@ int main() {
                             for (int i = 0; i < d; i++) {
                                 data[i] = distrib_real(rng);
                             }
-                            alg_hnsw->addPoint(data.data(), label);
+                            auto rs = alg_hnsw->addPoint(data.data(), label, {false});
+                            if (!rs.ok()) {
+                                std::cerr << "Error: " << rs.message() << std::endl;
+                            }
                         }
                     }
                 )
@@ -100,7 +103,7 @@ int main() {
             for (int i = 0; i < d; i++) {
                 data[i] = distrib_real(rng);
             }
-            alg_hnsw->addPoint(data.data(), label);
+            alg_hnsw->addPoint(data.data(), label, {false});
         }
     }
 
@@ -115,9 +118,11 @@ int main() {
     num_threads = 20;
     int chunk_size = max_elements / num_threads;
     for (size_t thread_id = 0; thread_id < num_threads; thread_id++) {
+        LOG(INFO)<< "Creating thread " << thread_id;
         threads.push_back(
             std::thread(
                 [&, thread_id] {
+                    try {
                     std::uniform_int_distribution<> distrib_int(0, chunk_size - 1);
                     int start_id = thread_id * chunk_size;
                     std::vector<bool> marked_deleted(chunk_size);
@@ -128,10 +133,17 @@ int main() {
                             alg_hnsw->unmarkDelete(label);
                             marked_deleted[id] = false;
                         } else {
-                            alg_hnsw->markDelete(label);
+                            auto rs = alg_hnsw->markDelete(label);
+                            if (!rs.ok()) {
+                                std::cout<< "Marked deleted " << label << "status: " << rs.message() << std::endl;
+                                exit(1);
+                            }
                             marked_deleted[id] = true;
                         }
                     }
+                } catch (const std::exception &e) {
+                    std::cerr << "Error: " << e.what() << std::endl;
+                }
                 }
             )
         );
@@ -151,7 +163,7 @@ int main() {
                         for (int i = 0; i < d; i++) {
                             data[i] = distrib_real(rng);
                         }
-                        alg_hnsw->addPoint(data.data(), label);
+                        alg_hnsw->addPoint(data.data(), label, {false});
                         std::vector<float> data = alg_hnsw->getDataByLabel<float>(label);
                         float max_val = *max_element(data.begin(), data.end());
                         // never happens but prevents compiler from deleting unused code

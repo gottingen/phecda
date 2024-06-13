@@ -80,6 +80,12 @@ namespace phekda {
         // then set up your setting
         // 4. context.with_index_conf(user_set);
         std::any index_conf;
+
+        // default is results sorted by distance
+        // distance smaller first, mean closer first
+        // if reverse_result is true, the result will be sorted by distance
+        // distance bigger first, mean further first
+        bool reverse_result{false};
         /// data section
         // query start time
         turbo::Time start_time;
@@ -102,8 +108,8 @@ namespace phekda {
             return *this;
         }
 
-        SearchContext& with_query(const turbo::Nonnull<uint8_t *> query_ptr, uint32_t bytes) {
-            this->query.assign(query_ptr, query_ptr + bytes);
+        SearchContext& with_query(const turbo::Nonnull<const uint8_t *> query_ptr) {
+            this->query.assign(query_ptr, query_ptr + data_size);
             return *this;
         }
 
@@ -166,11 +172,11 @@ namespace phekda {
             return condition->is_whitelist(label);
         }
 
-        TURBO_MUST_USE_RESULT bool should_stop_search(DistanceType dis) const {
+        TURBO_MUST_USE_RESULT bool should_stop_search(DistanceType dis, DistanceType lower_bound) const {
             if (condition == nullptr) {
                 return false;
             }
-            return condition->should_stop_search(dis);
+            return condition->should_stop_search(dis, lower_bound);
         }
 
         TURBO_MUST_USE_RESULT bool should_explain() const {

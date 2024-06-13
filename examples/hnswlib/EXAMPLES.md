@@ -180,6 +180,6 @@ int main() {
 ```
 
 Multithreaded examples:
-* Creating index, inserting elements, searching [example_mt_search.cpp](example_mt_search.cpp)
-* Filtering during the search with a boolean function [example_mt_filter.cpp](example_mt_filter.cpp)
+* Creating index, inserting elements, searching [example_mt_search.cpp](example_mt_search.cc)
+* Filtering during the search with a boolean function [example_mt_filter.cpp](mt_filter_example.cc)
 * Reusing the memory of the deleted elements when new elements are being added [example_mt_replace_deleted.cpp](example_mt_replace_deleted.cpp)
