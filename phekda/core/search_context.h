@@ -172,11 +172,11 @@ namespace phekda {
             return condition->is_whitelist(label);
         }
 
-        TURBO_MUST_USE_RESULT bool should_stop_search(DistanceType dis) const {
+        TURBO_MUST_USE_RESULT bool should_stop_search(DistanceType dis, DistanceType lower_bound) const {
             if (condition == nullptr) {
                 return false;
             }
-            return condition->should_stop_search(dis);
+            return condition->should_stop_search(dis, lower_bound);
         }
 
         TURBO_MUST_USE_RESULT bool should_explain() const {

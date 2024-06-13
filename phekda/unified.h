@@ -24,6 +24,7 @@
 #include <turbo/utility/status.h>
 #include <phekda/core/config.h>
 #include <phekda/core/search_context.h>
+#include <phekda/conditions/bitmap_condition.h>
 #include <phekda/version.h>
 
 namespace phekda {

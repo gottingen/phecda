@@ -197,14 +197,14 @@ namespace phekda {
                 context.results.reserve(topResults.size());
                 while (!topResults.empty()) {
                     auto rez = topResults.top();
-                    context.results.emplace_back(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    context.results.emplace_back(rez.distance, rez.label, with_location ? rez.location: 0);
                     topResults.pop();
                 }
             } else {
                 context.results.resize(topResults.size());
                 for(int i = topResults.size() - 1; i >= 0; i--) {
                     auto rez = topResults.top();
-                    context.results[i] = ResultEntity(rez.distance, rez.label, context.with_location ? rez.location: 0);
+                    context.results[i] = ResultEntity(rez.distance, rez.label, with_location ? rez.location: 0);
                     topResults.pop();
                 }
             }

@@ -117,7 +117,7 @@ namespace phekda {
         // conf parameter, and trans the ownership of the
         // conf to index, let index judge if it can build
         bool support_build(std::any conf) const override {
-            false;
+            return false;
         }
 
         // build index
