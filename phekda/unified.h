@@ -82,7 +82,7 @@ namespace phekda {
         // default is init core config
         // if index need more meta, it should be specified in the config.index_conf
         // and override this function to create the meta
-        virtual SearchContext create_search_context() const;
+        TURBO_MUST_USE_RESULT virtual SearchContext create_search_context() const;
         // search vectors in index
         // this is the only way to search in index
         // if the index search in different way, it should be specified in the
@@ -101,7 +101,7 @@ namespace phekda {
 
         // get index snapshot
         // the index should be able to provide a snapshot
-        virtual LabelType snapshot_id() const = 0;
+        TURBO_MUST_USE_RESULT virtual LabelType snapshot_id() const = 0;
 
         // install snapshot to index
         // the index should be able to install the snapshot
@@ -116,17 +116,17 @@ namespace phekda {
         virtual turbo::Status load(const std::string &path, const IndexConfig &config) = 0;
 
         // index is real time or not
-        virtual bool support_dynamic() const = 0;
+        TURBO_MUST_USE_RESULT virtual bool support_dynamic() const = 0;
 
         /// for index for not support dynamic
         // index need train or not
-        virtual bool need_train() const = 0;
+        TURBO_MUST_USE_RESULT virtual bool need_train() const = 0;
 
         // train index
         virtual turbo::Status train(std::any conf) = 0;
 
         // is index trained
-        virtual bool is_trained() const = 0;
+        TURBO_MUST_USE_RESULT virtual bool is_trained() const = 0;
 
         // index need build or not
         // various index may need build or not
@@ -136,7 +136,7 @@ namespace phekda {
         // let it configurable in the build function's
         // conf parameter, and trans the ownership of the
         // conf to index, let index judge if it can build
-        virtual bool support_build(std::any conf) const = 0;
+        TURBO_MUST_USE_RESULT virtual bool support_build(std::any conf) const = 0;
 
         // build index
         // build index should not modify the data in the index
@@ -145,11 +145,11 @@ namespace phekda {
         // next time a new index should be call load to load the new index data
         virtual turbo::Status build(std::any conf) const = 0;
 
-        virtual CoreConfig get_core_config() const = 0;
+        TURBO_MUST_USE_RESULT virtual CoreConfig get_core_config() const = 0;
 
-        virtual IndexConfig get_index_config() const = 0;
+        TURBO_MUST_USE_RESULT virtual IndexConfig get_index_config() const = 0;
 
-        virtual IndexInitializationType get_initialization_type() const = 0;
+        TURBO_MUST_USE_RESULT  virtual IndexInitializationType get_initialization_type() const = 0;
 
     };
 
